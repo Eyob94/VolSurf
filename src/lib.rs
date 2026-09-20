@@ -18,6 +18,7 @@ use crate::{
 mod config;
 mod data;
 mod message;
+pub mod ui;
 
 pub struct IBConnector {
     pub handle: JoinHandle<eyre::Result<()>>,
