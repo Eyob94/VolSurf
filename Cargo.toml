@@ -4,15 +4,24 @@ version = "0.1.0"
 edition = "2024"
 
 [[bin]]
-path = "./src/bin/gui.rs"
-name="gui"
+path = "./src/bin/volsurf.rs"
+name = "volsurf"
 
 [dependencies]
+chrono = "0.4.45"
 clap = { version = "4.6.7", features = ["env", "derive"] }
 crossbeam = "0.8.5"
 eframe = "0.35.0"
 egui_plot = "0.36.0"
 eyre = "0.6.14"
+parking_lot = "0.12.5"
+serde = { version = "1.0.229", features = ["derive"] }
+strum = "0.28.0"
+strum_macros = "0.28.0"
 tokio = { version = "1.53.1", features = ["full"] }
 tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json"] }
+tracing-subscriber = { version = "0.3.23", features = [
+    "env-filter",
+    "fmt",
+    "json",
+] }
