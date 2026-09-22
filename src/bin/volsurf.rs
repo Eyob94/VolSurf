@@ -1,6 +1,6 @@
 use clap::Parser;
 use eframe::egui;
-use volsurf::{Config, orchestrator::Orchestrator, telemetry::init_tracing, ui::UI};
+use volsurf::{Config, orchestrator::Orchestrator, telemetry::init_tracing};
 
 fn main() -> eyre::Result<()> {
     init_tracing();

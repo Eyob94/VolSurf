@@ -17,7 +17,7 @@ mod parser;
 
 pub use actions::*;
 
-use crate::{Config, ibkr::parser::parse_ib_bytes};
+use crate::{Config, ibkr::parser::parse_ib_bytes, };
 
 pub use message::IBMessage;
 pub use parser::IBData;
@@ -87,7 +87,6 @@ impl IBConnector {
                     .unwrap();
 
                 info!(?payload, "Received payload");
-
                 send_message_to_ibkr(&mut writer, payload.into_bytes())
                     .await
                     .unwrap();

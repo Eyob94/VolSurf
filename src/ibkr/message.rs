@@ -55,10 +55,7 @@ impl Contract {
         self
     }
 
-    pub fn with_last_trade_date_or_contract_month(
-        mut self,
-        date: impl Into<String>,
-    ) -> Self {
+    pub fn with_last_trade_date_or_contract_month(mut self, date: impl Into<String>) -> Self {
         self.last_trade_date_or_contract_month = date.into();
         self
     }
@@ -99,9 +96,10 @@ pub enum OptionSide {
 }
 
 #[derive(Debug, Clone, Display, Default)]
+#[strum(serialize_all = "UPPERCASE")]
 pub enum Currency {
     #[default]
-    USD,
+    Usd,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Hash)]
@@ -110,15 +108,21 @@ pub enum IBKRMessageID {
     StartApi,
     ReqSecDefOptParams,
     ReqContractDetails,
+    CancelMktData,
+    ReqMarketDataType,
+    ReqMktData,
 }
 
 impl IBKRMessageID {
     pub fn into_wire_id(self) -> u32 {
         match self {
             Self::StartApi => 71,
+            Self::ReqMktData => 1,
 
+            Self::CancelMktData => 2,
             Self::ReqSecDefOptParams => 78,
             Self::ReqContractDetails => 9,
+            Self::ReqMarketDataType => 59,
         }
     }
 }

@@ -1,7 +1,8 @@
 mod config;
 mod ibkr;
+pub mod orchestrator;
 pub mod telemetry;
 pub mod ui;
-pub mod orchestrator;
+mod message;
 
 pub use {config::Config, ibkr::IBConnector};
