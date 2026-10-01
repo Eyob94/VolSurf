@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use crossbeam::channel::Sender;
-use tracing::{info, instrument};
+use tracing::info;
 
 use crate::ibkr::{
     IBMessage, cancel_market_data, message::OptionSide, parse_message, request_option_market_data,
@@ -26,7 +26,7 @@ pub struct TickerData {
     pub selected_expiry: Option<NaiveDate>,
     pub last_updated: DateTime<Utc>,
     pub subscribed_strikes: Vec<(u32, u32, bool)>, // (req_id, strike, active)
-    pub iv_points: Vec<(u32, f64)>,                // (strike, iv)
+    pub iv_points: HashMap<u32, f64>,              // (strike, iv)
 }
 
 impl IBData {
@@ -36,12 +36,15 @@ impl IBData {
         };
 
         if let Some(ticker_data) = self.tickers.get_mut(&selected_ticker) {
+            info!(?ticker_data.subscribed_strikes, "SUBSCRIBED");
+            info!(?ticker_data.selected_expiry, "Expiry");
             let Some(expiry) = ticker_data.selected_expiry else {
                 return Ok(());
             };
             let spot_price = ticker_data.spot_price;
             for strike in ticker_data.subscribed_strikes.iter_mut() {
                 if strike.2 && strike.0 == 0 {
+                    info!("Sending IV request");
                     let req_id = request_option_market_data(
                         selected_ticker.clone(),
                         expiry.to_string(),
@@ -119,7 +122,7 @@ impl TickerData {
         let mut sorted_strikes: Vec<u32> = chain
             .strikes
             .iter()
-            .filter(|&&s| (s as f64) >= lower && (s as f64) <= upper)
+            .filter(|&&s| ((s * 100) as f64) >= lower && ((s * 100) as f64) <= upper)
             .copied()
             .collect();
         sorted_strikes.sort();
@@ -146,14 +149,10 @@ impl TickerData {
             }
         }
     }
-
-    pub fn reconcile_strike_subs(&self, msg_tx: Sender<IBMessage>) {}
 }
 
-#[instrument(skip(raw_ib_response))]
 pub fn parse_ib_bytes(raw_ib_response: Vec<u8>, data: &mut IBData) -> eyre::Result<()> {
     let res = parse_message(&raw_ib_response)?;
-    info!(?res, "Raw IB Response");
 
     if res.is_empty() {
         return Ok(());
@@ -166,13 +165,12 @@ pub fn parse_ib_bytes(raw_ib_response: Vec<u8>, data: &mut IBData) -> eyre::Resu
             let tick_type: i32 = info[1].parse()?;
             let price: f64 = info[2].parse()?;
 
-            info!(?info, "SPY PRICE ***********");
-
             let Some(ticker) = &data.selected_ticker else {
                 return Ok(());
             };
 
-            if matches!(tick_type, 75)
+            info!(price, "SPX price");
+            if matches!(tick_type, 68)
                 && price > 0.0
                 && let Some(ticker_data) = data.tickers.get_mut(ticker)
             {
@@ -183,7 +181,6 @@ pub fn parse_ib_bytes(raw_ib_response: Vec<u8>, data: &mut IBData) -> eyre::Resu
             let ticker = res[2];
             let con_id: u32 = res[10].parse()?;
             let valid_exchanges: Vec<String> = res[13].split(',').map(|s| s.to_string()).collect();
-            info!(con_id, ?valid_exchanges, "Parsed contract details");
 
             data.tickers.insert(
                 ticker.to_string(),
@@ -197,6 +194,38 @@ pub fn parse_ib_bytes(raw_ib_response: Vec<u8>, data: &mut IBData) -> eyre::Resu
                 data.selected_ticker = Some(ticker.to_string())
             }
         }
+
+        // ["21", "22", "83", "0", "0.22921181020801557", "-1.0000000000001525", "31.608398437503524", "0.0", "-6.225082302474252E-14", "-1.4779288903810084E-12", "-3.524291969370097E-12", "767.4539794921875"]
+        "21" => {
+            let req_id: u32 = res[1].parse()?;
+            let implied_vol: f64 = res[4].parse()?;
+
+            if implied_vol < 0.0 {
+                return Ok(());
+            }
+
+            let Some(selected_ticker) = data.selected_ticker.clone() else {
+                return Ok(());
+            };
+            let Some(ticker_data) = data.tickers.get_mut(&selected_ticker) else {
+                return Ok(());
+            };
+
+            let Some(&(_, strike, _)) = ticker_data
+                .subscribed_strikes
+                .iter()
+                .find(|(id, _, _)| *id == req_id)
+            else {
+                return Ok(());
+            };
+
+            info!(strike, implied_vol, "SUBSCRIBED");
+
+            ticker_data.iv_points.insert(strike, implied_vol);
+
+            info!(?ticker_data.iv_points, "IV points");
+        }
+
         "75" => {
             let trading_class = res[4].to_string();
 

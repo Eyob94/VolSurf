@@ -1,6 +1,17 @@
 use serde::Serialize;
 use strum_macros::Display;
 
+#[derive(Debug, Clone)]
+pub enum DataMessage {
+    ConnectionStatus {
+        handshake: Option<bool>,
+        start_api: Option<bool>,
+    },
+
+
+    Payload(Vec<u8>),
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct IBMessage {
     id: IBKRMessageID,
@@ -138,7 +149,13 @@ impl IBMessage {
         fields.push(contract.con_id.unwrap_or_default());
         fields.push(contract.symbol);
         fields.push(contract.sec_type);
-        fields.push(contract.last_trade_date_or_contract_month);
+        fields.push(
+            contract
+                .last_trade_date_or_contract_month
+                .split("-")
+                .collect::<Vec<_>>()
+                .join(""),
+        );
         fields.push(contract.strike.map(|s| s.to_string()).unwrap_or_default());
         fields.push(contract.right.map(|s| s.to_string()).unwrap_or_default());
         fields.push(

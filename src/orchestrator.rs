@@ -8,8 +8,8 @@ use tracing::{error, info};
 use crate::{
     Config, IBConnector,
     ibkr::{
-        IBData, request_contract_details, request_delayed_market_data_type, request_options_chain,
-        request_spot_price,
+        DataMessage, IBData, parse_ib_bytes, request_contract_details,
+        request_delayed_market_data_type, request_options_chain, request_spot_price,
     },
     message::Message,
     ui::UI,
@@ -39,6 +39,27 @@ impl Orchestrator {
         };
 
         let msg_tx1 = msg_tx.clone();
+        let dx = data.clone();
+
+        thread::spawn(move || -> eyre::Result<()> {
+            loop {
+                let data = data_rx.recv()?;
+
+                match data {
+                    DataMessage::Payload(payload) => {
+                        parse_ib_bytes(payload, &mut dx.write())?;
+                    }
+                    DataMessage::ConnectionStatus {
+                        handshake,
+                        start_api,
+                    } => {
+                        let mut data = dx.write();
+                        data.handshake = handshake;
+                        data.start_api = start_api;
+                    }
+                }
+            }
+        });
         let dx = data.clone();
         thread::spawn(move || -> eyre::Result<()> {
             loop {
@@ -70,19 +91,6 @@ impl Orchestrator {
                         }
                     }
                 }
-            }
-        });
-
-        let dx = data.clone();
-        thread::spawn(move || {
-            loop {
-                match data_rx.recv() {
-                    Ok(d) => *dx.write() = d,
-                    Err(e) => {
-                        error!(?e, "Error receiving data object");
-                        continue;
-                    }
-                };
             }
         });
 

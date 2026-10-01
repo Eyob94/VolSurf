@@ -71,7 +71,6 @@ pub fn request_option_market_data(
         .field(req_id.to_string())
         .contract(contract)
         .field("")
-        .field("")
         .field("106")
         .field("0")
         .field("0")

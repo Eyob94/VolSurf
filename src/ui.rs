@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use chrono::NaiveDate;
 use crossbeam::channel::Sender;
 use eframe::egui;
 use parking_lot::RwLock;
@@ -10,7 +9,6 @@ use crate::{ibkr::IBData, message::Message};
 
 #[derive(Debug, Clone)]
 pub struct UI {
-    pub selected_expiry: Option<NaiveDate>,
     pub ib_data: Arc<RwLock<IBData>>,
     pub ui_tx: Option<Sender<Message>>,
 
@@ -21,7 +19,6 @@ pub struct UI {
 impl Default for UI {
     fn default() -> Self {
         Self {
-            selected_expiry: None,
             strike_range_pct: 0.1,
             strike_step: 5,
             ib_data: Arc::default(),
@@ -42,6 +39,8 @@ impl eframe::App for UI {
 
         let options_chain = ticker_data.and_then(|t| t.options_chain.as_ref());
         let spot_price = ticker_data.map(|t| t.spot_price);
+        let mut expiry = ticker_data.and_then(|t| t.selected_expiry);
+
         egui::CentralPanel::default().show(ui, |ui| {
             ui.heading("Vol Surf");
 
@@ -76,35 +75,50 @@ impl eframe::App for UI {
                 return;
             };
 
+            let prev_expiry = expiry;
+
             egui::ComboBox::from_label("Expiry")
-                .selected_text(
-                    self.selected_expiry
-                        .map(|d| d.to_string())
-                        .unwrap_or_default(),
-                )
+                .selected_text(expiry.map(|d| d.to_string()).unwrap_or_default())
                 .show_ui(ui, |ui| {
-                    for expiry in &chain.expirations {
-                        ui.selectable_value(
-                            &mut self.selected_expiry,
-                            Some(*expiry),
-                            expiry.to_string(),
-                        );
+                    for exp in &chain.expirations {
+                        ui.selectable_value(&mut expiry, Some(*exp), exp.to_string());
                     }
                 });
 
-            if self.selected_expiry.is_none() {
-                let expiration = chain.expirations.first().copied();
-                if let Some(exp) = expiration {
-                    self.selected_expiry = expiration;
-                    let ui_tx = self.ui_tx.as_ref().unwrap();
-                    let _ = ui_tx.send(Message::UpdateExpiry(exp));
-                }
+            if expiry.is_none() {
+                expiry = chain.expirations.first().copied();
             }
 
-            let plot_points: egui_plot::PlotPoints = chain
+            if expiry != prev_expiry
+                && let Some(exp) = expiry
+                && let Some(tx) = &self.ui_tx
+            {
+                let _ = tx.send(Message::UpdateExpiry(exp));
+            }
+
+            let iv_by_strike = ticker_data.map(|t| t.iv_points.clone());
+
+            let Some(iv_map) = iv_by_strike else {
+                ui.label("Waiting for IV data...");
+                return;
+            };
+
+            let mut points: Vec<(u32, f64)> = chain
                 .strikes
                 .iter()
-                .map(|strike| [*strike as f64, 0.0])
+                .filter_map(|strike| iv_map.get(strike).map(|iv| (*strike, *iv)))
+                .collect();
+
+            points.sort_by_key(|(strike, _)| *strike);
+
+            if points.is_empty() {
+                ui.label("Waiting for IV data...");
+                return;
+            }
+
+            let plot_points: egui_plot::PlotPoints = points
+                .iter()
+                .map(|(strike, iv)| [*strike as f64, *iv])
                 .collect();
 
             egui_plot::Plot::new("skew_plot")

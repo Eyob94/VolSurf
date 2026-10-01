@@ -17,10 +17,10 @@ mod parser;
 
 pub use actions::*;
 
-use crate::{Config, ibkr::parser::parse_ib_bytes, };
+use crate::Config;
 
-pub use message::IBMessage;
-pub use parser::IBData;
+pub use message::{DataMessage, IBMessage};
+pub use parser::{IBData, parse_ib_bytes};
 
 pub struct IBConnector {
     pub handles: [JoinHandle<eyre::Result<()>>; 2],
@@ -30,20 +30,22 @@ impl IBConnector {
     #[instrument(skip_all, name = "ib_connector")]
     pub fn new(
         config: &Config,
-        data_tx: Sender<IBData>,
+        data_tx: Sender<DataMessage>,
         msg_rx: Receiver<IBMessage>,
         rt: &Runtime,
     ) -> eyre::Result<Self> {
         let port = config.ib_port;
         let client_id = config.client_id;
-        let (mut reader, mut writer, mut data) = match rt.block_on(async move {
-            let mut data = IBData::default();
-
+        let dx = data_tx.clone();
+        let (mut reader, mut writer) = match rt.block_on(async move {
             let (mut reader, mut writer) = connect_to_ibkr(port).await?;
 
             writer.write_all(&IBMessage::handshake()).await?;
 
-            data.handshake = Some(false);
+            dx.send(DataMessage::ConnectionStatus {
+                handshake: Some(false),
+                start_api: None,
+            })?;
 
             let handshake_payload = read_message_from_ibkr(&mut reader).await?;
 
@@ -51,11 +53,17 @@ impl IBConnector {
 
             debug!(?handshake_msg, "Handshake complete");
 
-            data.handshake = Some(true);
+            dx.send(DataMessage::ConnectionStatus {
+                handshake: Some(true),
+                start_api: None,
+            })?;
 
             send_message_to_ibkr(&mut writer, IBMessage::start_api_bytes(client_id)).await?;
 
-            data.start_api = Some(false);
+            dx.send(DataMessage::ConnectionStatus {
+                handshake: Some(true),
+                start_api: Some(false),
+            })?;
 
             loop {
                 let payload = read_message_from_ibkr(&mut reader).await?;
@@ -65,12 +73,15 @@ impl IBConnector {
 
                 if fields.first() == Some(&"9") {
                     info!("API is accepted");
-                    data.start_api = Some(true);
+                    dx.send(DataMessage::ConnectionStatus {
+                        handshake: Some(true),
+                        start_api: Some(true),
+                    })?;
                     break;
                 }
             }
 
-            Ok::<_, eyre::Report>((reader, writer, data))
+            Ok::<_, eyre::Report>((reader, writer))
         }) {
             Ok(l) => l,
             Err(e) => {
@@ -79,7 +90,7 @@ impl IBConnector {
             }
         };
 
-        let reader_handle = rt.spawn(async move {
+        let writer_handle = rt.spawn(async move {
             loop {
                 let msg_rx = msg_rx.clone();
                 let payload = tokio::task::spawn_blocking(move || msg_rx.recv().unwrap())
@@ -93,12 +104,11 @@ impl IBConnector {
             }
         });
 
-        let writer_handle = rt.spawn(async move {
+        let reader_handle = rt.spawn(async move {
             loop {
                 let payload = read_message_from_ibkr(&mut reader).await.unwrap();
 
-                parse_ib_bytes(payload, &mut data).unwrap();
-                data_tx.send(data.clone()).unwrap();
+                data_tx.send(DataMessage::Payload(payload)).unwrap();
             }
         });
 
